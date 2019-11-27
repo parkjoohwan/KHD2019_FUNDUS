@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" autoUpload="Always" serverName="bjc@218.150.183.58:22">
+    <serverData>
+      <paths name="bjc@218.150.183.58:22">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/bjc/projects/Classification/EfficientNet_CIFAR10" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+    </serverData>
+    <option name="myAutoUpload" value="ALWAYS" />
+  </component>
+</project>
