@@ -1,52 +1,89 @@
-from os import listdir
-from os.path import join
+import os
+import argparse
+import sys
+import time
+import random
+import keras
+import cv2
+import numpy as np
 
-from PIL import Image
-from torch.utils.data.dataset import Dataset
-from torchvision.transforms import Compose, ToTensor, ToPILImage, Resize, ColorJitter, RandomCrop, RandomHorizontalFlip, RandomVerticalFlip, CenterCrop
-import torch
-
-
-#이미지 파일 읽기
-def is_image_file(filename):
-    return any(filename.endswith(extension) for extension in ['.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG'])
+crop_factor = 0.1
 
 
-#train_data
-def train_transform(Crop_h_size, Crop_w_size, h_size, w_size, pad):
-    return Compose([
-        CenterCrop((Crop_h_size, Crop_w_size)), #이미지에 가운데를 h_size, w_size로 Crop함
-        Resize((h_size, w_size), interpolation=Image.BICUBIC), #이미지 크기를 h_size, w_size로 통일함
-        #ColorJitter( #밝기를 랜덤하게 조정
-        #    brightness = abs(0.1 * float(torch.randn(1))),
-        #    contrast = abs(0.1 * float(torch.randn(1))),
-        #    saturation = abs(0.1 * float(torch.randn(1))),
-        #    hue = abs(0.1 * float(torch.randn(1)))
-        #),
-        RandomHorizontalFlip(p=0.5), #수평으로 랜덤하게 flip
-        RandomVerticalFlip(p=0.5), #수직으로 랜덤하게 flip
-        RandomCrop((h_size, w_size), padding=pad), #이미지를 Crop한 뒤에 빈 곳을 pad함
-        ToTensor(),
-    ])
+def image_preprocessing(im, rescale, resize_factor):
+    ## 이미지 크기 조정 및 픽셀 범위 재설정
+    h, w, c = 3072, 3900, 3
+    nh, nw = int(h//resize_factor), int(w//resize_factor)
+    # print(im.shape)
+
+    #CROP
+    xstart = int(w * crop_factor)
+    ystart = int(h * crop_factor)
+    xend = int(w * (1 - crop_factor))
+    yend = int(h * (1 - crop_factor))
+
+    # print(xstart, ystart, xend, yend)
+
+    im = im[ystart:yend, xstart:xend]
+
+    res = cv2.resize(im, (nw, nh), interpolation=cv2.INTER_AREA)
+
+    if rescale == True:
+        res = res / 255.
+
+    return res
 
 
-class TrainDatasetFromFolder(Dataset):
-    def __init__(self, dataset_dir, Crop_h_size, Crop_w_size, h_size, w_size, pad):
-        super(TrainDatasetFromFolder, self).__init__()
-        self.AMD_image_filenames = [[join(dataset_dir, "AMD", x), 0] for x in listdir(join(dataset_dir, "AMD")) if is_image_file(x)]
-        self.DMR_image_filenames = [[join(dataset_dir, "DMR", x), 1] for x in listdir(join(dataset_dir, "DMR")) if is_image_file(x)]
-        self.NORMAL_image_filenames = [[join(dataset_dir, "NORMAL", x), 2] for x in listdir(join(dataset_dir, "NORMAL")) if is_image_file(x)]
-        self.RVO_image_filenames = [[join(dataset_dir, "RVO", x), 3] for x in listdir(join(dataset_dir, "RVO")) if is_image_file(x)]
-        self.image_filenames = self.AMD_image_filenames + self.DMR_image_filenames + self.NORMAL_image_filenames + self.RVO_image_filenames
+def Label2Class(label):     # one hot encoding (0-3 --> [., ., ., .])
 
-        #data agumentation
-        self.transform = train_transform(Crop_h_size, Crop_w_size, h_size, w_size, pad)
+    resvec = [0, 0, 0, 0]
+    if label == 'AMD':		cls = 1;    resvec[cls] = 1
+    elif label == 'RVO':	cls = 2;    resvec[cls] = 1
+    elif label == 'DMR':	cls = 3;    resvec[cls] = 1
+    else:					cls = 0;    resvec[cls] = 1		# Normal
 
-    def __getitem__(self, index):
-        image = self.transform(Image.open(self.image_filenames[index][0]))
-        label = self.image_filenames[index][1]
-        return image, label
+    return resvec
 
-    def __len__(self):
-        return len(self.image_filenames)
+
+def dataset_loader(img_path, rescale, resize_factor):
+
+    t1 = time.time()
+    print('Loading training data...\n')
+    if not ((resize_factor == 1.) and (rescale == False)):
+        print('Image preprocessing...')
+    if not resize_factor == 1.:
+        print('Image size is 3072*3900*3')
+        print('Resizing the image into {}*{}*{}...'.format(int(3072//resize_factor), int(3900//resize_factor), 3))
+    if not rescale == False:
+        print('Rescaling range of 0-255 to 0-1...\n')
+
+    ## 이미지 읽기
+    p_list = [os.path.join(dirpath, f) for dirpath, dirnames, files in os.walk(img_path) for f in files if all(s in f for s in ['.jpg'])]
+    p_list.sort()
+    num_data = len(p_list)
+
+    images = []
+    labels = []
+    for i, p in enumerate(p_list):
+        im = cv2.imread(p, 3)
+        if not (resize_factor == 1.):
+            im = image_preprocessing(im, rescale=rescale, resize_factor=resize_factor)
+        images.append(im)
+
+        # label 데이터 생성
+        l = Label2Class(p.split('/')[-2])
+        labels.append(l)
+
+        print(i + 1, '/', num_data, ' image(s)')
+
+    images = np.array(images)
+    labels = np.array(labels)
+
+    t2 = time.time()
+    print('Dataset prepared for' ,t2 -t1 ,'sec')
+    print('Images:' ,images.shape ,'np.array.shape(files, views, width, height)')
+    print('Labels:', labels.shape, ' among 0-3 classes')
+
+    return images, labels
+
 
